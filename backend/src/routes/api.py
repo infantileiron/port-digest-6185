@@ -1,13 +1,15 @@
 from fastapi import APIRouter,Depends,HTTPException
 from src.config.database import db
+from src.models.entities import ReportBasis
+from src.constants.enums import STATIONS
 from src.models.entities import User,Subscription,Receipt,Audit
-from src.schemas.business import Login,ArrivalInput,SubscriptionInput,PreviewInput,ReviewInput
+from src.schemas.business import Login,ArrivalInput,SubscriptionInput,PreviewInput,ReviewInput,OutageInput
 from src.middlewares.auth import current,editor,admin
 from src.utils.security import verify,token
-from src.utils.time import now_utc,yesterday,SH
+from src.utils.time import now_utc,yesterday
 from src.services.business import audit,dump
-from src.services.repository import arrival_rows,save_arrival,save_subscription,get_receipt
-from src.services.digest import calculate
+from src.services.repository import arrival_rows,outage_rows,save_arrival,save_outage,save_subscription,get_receipt,lock_basis,basis_dict,locked_bases,preview_bases,unassigned_rows
+from src.services.digest import metrics,aggregate
 from src.controllers.business import export_receipt
 router=APIRouter()
 @router.post('/auth/login')
@@ -19,7 +21,7 @@ def login(data:Login,s=Depends(db)):
 def me(u=Depends(current)):return dump(u)
 @router.get('/context')
 def context(u=Depends(current)):
- now=now_utc();return {'now':now.isoformat(),'yesterday':yesterday(now),'timezone':'Asia/Shanghai'}
+ now=now_utc();return {'now':now.isoformat(),'yesterday':yesterday(now),'timezone':'Asia/Shanghai','stations':list(STATIONS)}
 @router.get('/arrivals')
 def arrivals(u=Depends(current),s=Depends(db)):return arrival_rows(s)
 @router.post('/arrivals')
@@ -28,9 +30,32 @@ def create_arrival(data:ArrivalInput,u=Depends(editor),s=Depends(db)):
 @router.put('/arrivals/{i}')
 def edit_arrival(i:int,data:ArrivalInput,u=Depends(editor),s=Depends(db)):
  r=save_arrival(s,data,i);audit(s,u,'修订班次 '+r.code);return dump(r)
+@router.get('/outages')
+def outages(u=Depends(current),s=Depends(db)):return outage_rows(s)
+@router.post('/outages')
+def create_outage(data:OutageInput,u=Depends(editor),s=Depends(db)):
+ r=save_outage(s,data,u.email);audit(s,u,'登记停运 '+r.station+' '+r.started_at+'~'+r.ended_at);return dump(r)
+@router.put('/outages/{i}')
+def edit_outage(i:int,data:OutageInput,u=Depends(editor),s=Depends(db)):
+ r=save_outage(s,data,u.email,i);audit(s,u,'修订停运 '+str(i));return dump(r)
 @router.post('/preview')
 def preview(data:PreviewInput,u=Depends(editor),s=Depends(db)):
- result=calculate(arrival_rows(s),data.report_day.isoformat(),data.station);audit(s,u,'晨报试算 '+data.report_day.isoformat());return result
+ day=data.report_day.isoformat()
+ if data.station=='全部':
+  bases=preview_bases(s,day)
+  result=aggregate(day,bases,unassigned_rows(s,day,bases))
+ else:
+  record,created=lock_basis(s,day,data.station,u.email)
+  if created:audit(s,u,'锁定依据 '+day+' '+data.station)
+  s.commit()
+  locked=[basis_dict(r) for r in s.query(ReportBasis).filter_by(report_day=day).all()]
+  loose=[r for r in unassigned_rows(s,day,locked) if r['station']==data.station]
+  result=metrics(day,data.station,basis_dict(record),loose)
+ audit(s,u,'晨报试算 '+day+' / '+data.station)
+ return result
+@router.get('/bases/{report_day}')
+def bases(report_day:str,u=Depends(current),s=Depends(db)):
+ return locked_bases(s,report_day)
 @router.get('/subscriptions')
 def subscriptions(u=Depends(current),s=Depends(db)):return [dump(r) for r in s.query(Subscription).order_by(Subscription.id).all()]
 @router.post('/subscriptions')

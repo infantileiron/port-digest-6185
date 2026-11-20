@@ -6,6 +6,9 @@ class User(Base):
 class Arrival(Base):
  __tablename__='arrivals'
  id=Column(Integer,primary_key=True);code=Column(String(60),unique=True,nullable=False);station=Column(String(30));planned_at=Column(String(40));actual_at=Column(String(40),nullable=True);note=Column(Text,default='')
+class Outage(Base):
+ __tablename__='outages'
+ id=Column(Integer,primary_key=True);station=Column(String(30),nullable=False);started_at=Column(String(40),nullable=False);ended_at=Column(String(40),nullable=False);note=Column(Text,default='');created_by=Column(String(100));created_at=Column(String(40));updated_at=Column(String(40))
 class Subscription(Base):
  __tablename__='subscriptions'
  id=Column(Integer,primary_key=True);name=Column(String(100),unique=True,nullable=False);station=Column(String(30));daily_at=Column(String(5));recipient=Column(String(80));enabled=Column(Boolean,default=False);next_run_at=Column(String(40));last_run_at=Column(String(40),nullable=True)
@@ -13,6 +16,10 @@ class Receipt(Base):
  __tablename__='receipts'
  __table_args__=(UniqueConstraint('subscription_id','report_day',name='uq_receipt_subscription_day'),)
  id=Column(Integer,primary_key=True);subscription_id=Column(Integer,ForeignKey('subscriptions.id'));report_day=Column(String(10));recipient=Column(String(80));created_at=Column(String(40));state=Column(String(20),default='delivered');payload=Column(JSON);review_note=Column(Text,default='')
+class ReportBasis(Base):
+ __tablename__='report_bases'
+ __table_args__=(UniqueConstraint('report_day','station',name='uq_report_basis_day_station'),)
+ id=Column(Integer,primary_key=True);report_day=Column(String(10),nullable=False);station=Column(String(30),nullable=False);created_at=Column(String(40));created_by=Column(String(100));checksum=Column(String(64));payload=Column(JSON)
 class Audit(Base):
  __tablename__='audits'
  id=Column(Integer,primary_key=True);actor=Column(String(100));action=Column(String(200));created=Column(String(40))

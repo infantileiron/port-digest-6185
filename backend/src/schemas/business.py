@@ -3,6 +3,7 @@ from datetime import date
 from typing import Literal,Optional
 from pydantic import BaseModel,Field,field_validator,model_validator,ValidationInfo
 from src.utils.time import aware
+from src.constants.enums import STATIONS
 class Login(BaseModel):email:str;password:str
 class ArrivalInput(BaseModel):
  code:str=Field(min_length=1,max_length=60)
@@ -18,6 +19,22 @@ class ArrivalInput(BaseModel):
  @model_validator(mode='after')
  def range(self):
   if self.actual_at and abs((aware(self.actual_at)-aware(self.planned_at)).total_seconds())>3*86400:raise ValueError('实际与计划时间相差超过3天，请核对')
+  return self
+class OutageInput(BaseModel):
+ station:Literal['北站','南站','东港']
+ started_at:str
+ ended_at:str
+ note:str=Field(default='',max_length=1000)
+ @field_validator('started_at','ended_at')
+ @classmethod
+ def normalize(cls,v):
+  if not v:raise ValueError('停运起止时间不能为空')
+  return aware(v).isoformat()
+ @model_validator(mode='after')
+ def span(self):
+  start,end=aware(self.started_at),aware(self.ended_at)
+  if end<=start:raise ValueError('停运结束时间必须晚于开始时间')
+  if (end-start).total_seconds()>7*86400:raise ValueError('单条停运超过7天，请拆分登记')
   return self
 class SubscriptionInput(BaseModel):
  name:str=Field(min_length=2,max_length=100)
